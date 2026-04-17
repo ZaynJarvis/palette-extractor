@@ -261,19 +261,58 @@
     handleFiles(e.dataTransfer.files);
   });
 
-  // Copy-selected button
+  // Copy via clipboard API, falling back to the legacy execCommand path
+  // (works in insecure origins where navigator.clipboard is undefined).
+  async function copyToClipboard(text) {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(text); return { ok: true }; }
+      catch (err) { /* fall through to legacy */ }
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (ok) return { ok: true };
+    } catch (_) {}
+    const reasons = [];
+    if (!window.isSecureContext) reasons.push('insecure origin (use https or localhost)');
+    if (!document.hasFocus()) reasons.push('document not focused');
+    return { ok: false, reason: reasons.join(' · ') || 'clipboard permission denied' };
+  }
+
   copyBtn.addEventListener('click', async () => {
     const chosen = [...results.querySelectorAll('.swatch.selected')];
     if (!chosen.length) return;
     const text = chosen.map(s => `${s.dataset.type}: ${s.dataset.hex}`).join('\n') + '\n';
-    try {
-      await navigator.clipboard.writeText(text);
+    const res = await copyToClipboard(text);
+    if (res.ok) {
       flashToast(`Copied ${chosen.length} color${chosen.length === 1 ? '' : 's'}`);
-    } catch {
-      showError('Clipboard blocked — text shown in console.');
-      console.log(text);
+    } else {
+      showManualCopy(text, res.reason);
     }
   });
+
+  // Last-ditch: render the text in a selected textarea so the user can ⌘C manually.
+  function showManualCopy(text, reason) {
+    const box = document.createElement('div');
+    box.className = 'err';
+    box.style.background = '#0b0b0b';
+    box.innerHTML = `<div style="margin-bottom:8px">Clipboard blocked — ${escapeHTML(reason)}. Select + ⌘C:</div>`;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.rows = Math.min(10, text.split('\n').length);
+    ta.style.cssText = 'width:100%;font:inherit;background:#fff;color:#0b0b0b;border:3px solid #fff;padding:8px;box-sizing:border-box;';
+    box.appendChild(ta);
+    errEl.appendChild(box);
+    ta.focus();
+    ta.select();
+  }
 
   function refreshSelection() {
     const n = results.querySelectorAll('.swatch.selected').length;
