@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PALETTE.EXE</title>
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --ink: #0b0b0b;
+      --hit: #ffd60a;
+      --shadow-offset: 10px;
+      --swatch: 140px;
+      --pop: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, "Courier New", monospace;
+      padding: 32px clamp(16px, 4vw, 64px) 120px;
+      min-height: 100vh;
+    }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 32px; }
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+      border: 4px solid var(--ink);
+      background: var(--hit);
+      padding: 10px 18px;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--ink);
+      display: inline-block;
+    }
+    .sub { font-size: 0.9rem; max-width: 460px; text-align: right; line-height: 1.35; }
+    .sub code { background: var(--ink); color: var(--bg); padding: 2px 6px; }
+
+    .drop {
+      border: 4px dashed var(--ink);
+      background: #fff;
+      padding: 72px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s;
+      user-select: none;
+    }
+    .drop.hot { background: var(--hit); transform: translate(-4px, -4px); box-shadow: 8px 8px 0 var(--ink); }
+    .drop b { display: block; font-size: 1.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .drop small { display: block; margin-top: 8px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.75rem; }
+
+    #results { margin-top: 32px; display: grid; gap: 32px; }
+    .card {
+      border: 4px solid var(--ink);
+      background: #fff;
+      padding: 20px;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--ink);
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 640px) { .card { grid-template-columns: 1fr; } }
+    .thumb {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      border: 3px solid var(--ink);
+      display: block;
+      image-rendering: auto;
+    }
+    .meta { font-size: 0.75rem; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; word-break: break-all; }
+
+    .palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+    }
+    .wrap {
+      position: relative;
+      width: var(--swatch);
+      height: var(--swatch);
+      background: var(--ink);
+    }
+    .swatch {
+      position: absolute;
+      inset: 0;
+      border: 4px solid var(--ink);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 10px 12px;
+      font-weight: 800;
+      font-size: 0.78rem;
+      line-height: 1.15;
+      text-transform: uppercase;
+      transition: transform 0.28s cubic-bezier(.18,.85,.25,1.2);
+      will-change: transform;
+    }
+    .swatch:hover { transform: translate(-4px, -4px); }
+    .swatch.popped { transform: translate(calc(-1 * var(--pop)), calc(-1 * var(--pop))); }
+    .swatch .type { opacity: 0.82; margin-bottom: 4px; letter-spacing: 0.06em; font-size: 0.7rem; }
+    .swatch .hex { font-size: 0.92rem; letter-spacing: 0.04em; }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(40px);
+      background: var(--ink);
+      color: var(--bg);
+      padding: 10px 16px;
+      border: 3px solid var(--ink);
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 99;
+    }
+    .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    .err {
+      border: 4px solid var(--ink);
+      background: #ff3b30;
+      color: #fff;
+      padding: 14px 18px;
+      margin-top: 16px;
+      box-shadow: 6px 6px 0 var(--ink);
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+    }
+
+    footer { margin-top: 60px; font-size: 0.75rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.08em; }
+    footer a { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Palette.exe</h1>
+    <div class="sub">
+      Drop images. Real pixels, real clusters.
+      <br/>API: <code>POST /api</code> · <code>{"images":["base64", ...]}</code> → plain text
+    </div>
+  </header>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload images">
+    <b>Drop images here</b>
+    <small>or click / press enter to pick — up to 16</small>
+    <input type="file" id="file" multiple accept="image/*" hidden />
+  </div>
+
+  <div id="err"></div>
+  <div id="results"></div>
+
+  <div class="toast" id="toast">Copied</div>
+
+  <footer>No storage. No uploads kept. Pixels counted, not guessed.</footer>
+
+<script>
+(() => {
+  const drop = document.getElementById('drop');
+  const file = document.getElementById('file');
+  const results = document.getElementById('results');
+  const errEl = document.getElementById('err');
+  const toast = document.getElementById('toast');
+
+  drop.addEventListener('click', () => file.click());
+  drop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); }
+  });
+  file.addEventListener('change', (e) => handleFiles(e.target.files));
+
+  ['dragenter', 'dragover'].forEach(ev =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('hot'); })
+  );
+  ['dragleave', 'drop'].forEach(ev =>
+    drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('hot'); })
+  );
+  drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+  window.addEventListener('paste', (e) => {
+    const items = [...(e.clipboardData?.items || [])].filter(i => i.kind === 'file' && i.type.startsWith('image/'));
+    if (items.length) handleFiles(items.map(i => i.getAsFile()));
+  });
+
+  async function handleFiles(fileList) {
+    errEl.innerHTML = '';
+    const files = [...fileList].filter(f => f && f.type.startsWith('image/'));
+    if (!files.length) return;
+    if (files.length > 16) {
+      showError('Max 16 images per batch. First 16 used.');
+    }
+    const batch = files.slice(0, 16);
+    const entries = await Promise.all(batch.map(async (f) => ({
+      name: f.name,
+      size: f.size,
+      url: URL.createObjectURL(f),
+      b64: await toBase64(f),
+    })));
+
+    const loading = document.createElement('div');
+    loading.className = 'err';
+    loading.style.background = '#0b0b0b';
+    loading.textContent = `Extracting ${batch.length} image${batch.length === 1 ? '' : 's'}…`;
+    results.prepend(loading);
+
+    try {
+      const res = await fetch('/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: entries.map(e => e.b64) }),
+      });
+      const text = await res.text();
+      loading.remove();
+      if (!res.ok) { showError(text || `HTTP ${res.status}`); return; }
+      const palettes = parsePaletteText(text, entries.length);
+      renderCards(entries, palettes);
+    } catch (err) {
+      loading.remove();
+      showError(err.message || String(err));
+    }
+  }
+
+  function toBase64(f) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onerror = () => reject(r.error);
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.readAsDataURL(f);
+    });
+  }
+
+  // Parse server text into per-image list of {type, hex}
+  function parsePaletteText(text, count) {
+    const blocks = count === 1
+      ? [text]
+      : text.split(/\n---\n/);
+    return blocks.map(block =>
+      block.split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('#') && l.includes(':'))
+        .map(l => {
+          const [type, hex] = l.split(':').map(s => s.trim());
+          return { type, hex };
+        })
+    );
+  }
+
+  function renderCards(entries, palettes) {
+    entries.forEach((entry, i) => {
+      const p = palettes[i] || [];
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div>
+          <img class="thumb" src="${entry.url}" alt="${escapeHTML(entry.name)}" />
+          <div class="meta">${escapeHTML(entry.name)} · ${(entry.size / 1024).toFixed(0)}kb · ${p.length} colors</div>
+        </div>
+        <div>
+          <div class="palette">
+            ${p.map(c => `
+              <div class="wrap">
+                <div class="swatch" data-hex="${c.hex}" style="background:${c.hex}; color:${contrast(c.hex)}">
+                  <div class="type">${escapeHTML(c.type)}</div>
+                  <div class="hex">${escapeHTML(c.hex)}</div>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+      card.querySelectorAll('.swatch').forEach(sw => {
+        sw.addEventListener('click', () => {
+          sw.classList.toggle('popped');
+          const hex = sw.dataset.hex;
+          if (navigator.clipboard) navigator.clipboard.writeText(hex).catch(() => {});
+          flashToast(`Copied ${hex}`);
+        });
+      });
+      results.prepend(card);
+    });
+  }
+
+  function contrast(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    // perceptual luminance
+    const L = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return L > 0.58 ? '#0b0b0b' : '#ffffff';
+  }
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  let toastTimer;
+  function flashToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('on'), 1200);
+  }
+
+  function showError(msg) {
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.textContent = msg;
+    errEl.appendChild(e);
+    setTimeout(() => e.remove(), 6000);
+  }
+})();
+</script>
+</body>
+</html>
