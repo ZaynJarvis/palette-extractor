@@ -204,10 +204,12 @@ def _image_to_b64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def extract_profiles(img: Image.Image) -> list[str]:
+def extract_profiles(img: Image.Image, *, force: bool = False) -> list[str]:
     """Detect avatar grid and extract each avatar as 24x24 base64 PNG.
 
-    Returns empty list if no grid pattern is detected (no-op).
+    When force=True, skip grid detection and always attempt extraction
+    using any separator bands found (even weak ones).
+    Returns empty list if no cells are found.
     """
     arr = np.array(img.convert("RGB"))
     h, w = arr.shape[:2]
@@ -221,15 +223,18 @@ def extract_profiles(img: Image.Image) -> list[str]:
     major_rows = _find_separator_bands(row_frac, MAJOR_SEP_THRESHOLD, MAJOR_SEP_MIN_WIDTH)
     major_cols = _find_separator_bands(col_frac, MAJOR_SEP_THRESHOLD, MAJOR_SEP_MIN_WIDTH)
 
-    # Need at least 2 separator bands on each axis to form a grid
-    if len(major_rows) < 2 and len(major_cols) < 2:
+    # Without force: need at least 2 separator bands on each axis
+    if not force and len(major_rows) < 2 and len(major_cols) < 2:
         return []
 
     panel_rows = _bands_to_cells(major_rows, h, min_size=40)
     panel_cols = _bands_to_cells(major_cols, w, min_size=40)
 
-    if not panel_rows or not panel_cols:
-        return []
+    # Force mode: if no panels found, treat entire image as one panel
+    if not panel_rows:
+        panel_rows = [(0, h)]
+    if not panel_cols:
+        panel_cols = [(0, w)]
 
     avatars: list[str] = []
     for pr0, pr1 in panel_rows:
@@ -243,17 +248,26 @@ def extract_profiles(img: Image.Image) -> list[str]:
             sub_rows = _bands_to_cells(sub_row_bands, ph, MIN_CELL_SIZE)
             sub_cols = _bands_to_cells(sub_col_bands, pw, MIN_CELL_SIZE)
 
+            # Force mode: if no sub-cells, treat entire panel as one cell
+            if force and not sub_rows:
+                sub_rows = [(0, ph)]
+            if force and not sub_cols:
+                sub_cols = [(0, pw)]
+
             for sr0, sr1 in sub_rows:
                 for sc0, sc1 in sub_cols:
                     cell = panel[sr0:sr1, sc0:sc1]
                     ch, cw = cell.shape[:2]
                     aspect = cw / max(ch, 1)
                     if ch < 50 or cw < 50 or aspect > 3.0 or aspect < 0.25:
-                        continue
+                        if not force:
+                            continue
                     trimmed = _trim_padding(cell, bg, BORDER_TOLERANCE)
                     th, tw = trimmed.shape[:2]
                     if th < MIN_AVATAR_DIM or tw < MIN_AVATAR_DIM:
-                        continue
+                        if not force:
+                            continue
+                        trimmed = cell  # force: use untrimmed
                     pil = Image.fromarray(trimmed).resize(
                         (PROFILE_OUTPUT_SIZE, PROFILE_OUTPUT_SIZE), Image.NEAREST,
                     )
@@ -264,12 +278,13 @@ def extract_profiles(img: Image.Image) -> list[str]:
 
 class ProfileRequest(BaseModel):
     image: str = Field(..., description="Base64-encoded composite image")
+    force: bool = Field(False, description="Force extraction, skip grid detection")
 
 
 @app.post("/api/profiles")
 async def api_profiles(req: ProfileRequest) -> JSONResponse:
     img = _decode_image(req.image)
-    results = extract_profiles(img)
+    results = extract_profiles(img, force=req.force)
     return JSONResponse({"avatars": results, "count": len(results)})
 
 

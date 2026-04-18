@@ -184,6 +184,45 @@
       letter-spacing: 0.06em;
     }
 
+    .switch-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .switch {
+      position: relative;
+      width: 52px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #ccc;
+      border: 3px solid var(--ink);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--ink);
+      transition: left 0.2s;
+    }
+    .switch input:checked + .slider { background: var(--hit); }
+    .switch input:checked + .slider::before { left: 26px; }
+
     footer { margin-top: 60px; font-size: 0.75rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.08em; }
     footer a { color: var(--ink); }
   </style>
@@ -198,6 +237,14 @@
     <b>Drop composite avatar image</b>
     <small>or click / paste (Cmd+V) — detects grid, extracts 24x24 avatars</small>
     <input type="file" id="file" accept="image/*" hidden />
+  </div>
+
+  <div class="switch-row">
+    <label class="switch">
+      <input type="checkbox" id="forceSwitch" />
+      <span class="slider"></span>
+    </label>
+    <span>Force extraction (skip grid detection)</span>
   </div>
 
   <div id="err"></div>
@@ -224,6 +271,7 @@
   const results = document.getElementById('results');
   const errEl = document.getElementById('err');
   const toast = document.getElementById('toast');
+  const forceSwitch = document.getElementById('forceSwitch');
   const preview = document.getElementById('preview');
   const previewImg = document.getElementById('previewImg');
   const previewInfo = document.getElementById('previewInfo');
@@ -297,7 +345,7 @@
       const res = await fetch('/api/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64 }),
+        body: JSON.stringify({ image: b64, force: forceSwitch.checked }),
       });
       const data = await res.json();
       loading.remove();
