@@ -7,8 +7,6 @@ import binascii
 import colorsys
 from io import BytesIO
 from pathlib import Path
-from typing import Any
-
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
