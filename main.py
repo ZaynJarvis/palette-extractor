@@ -122,7 +122,7 @@ def _format_palette_text(palettes: list[list[tuple[str, str]]]) -> str:
 # Profile Extractor — color-difference grid detection for avatar cropping
 # ---------------------------------------------------------------------------
 
-PROFILE_OUTPUT_SIZE = 24
+PROFILE_OUTPUT_SIZE = 64
 MIN_CELL_SIZE = 20
 MIN_AVATAR_DIM = 30
 BORDER_TOLERANCE = 25
@@ -205,7 +205,7 @@ def _image_to_b64(img: Image.Image) -> str:
 
 
 def extract_profiles(img: Image.Image, *, force: bool = False) -> list[str]:
-    """Detect avatar grid and extract each avatar as 24x24 base64 PNG.
+    """Detect avatar grid and extract each avatar as 64x64 base64 PNG.
 
     When force=True, skip grid detection and always attempt extraction
     using any separator bands found (even weak ones).
