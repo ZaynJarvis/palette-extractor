@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROFILE.EXE</title>
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --ink: #0b0b0b;
+      --hit: #ffd60a;
+      --shadow-offset: 10px;
+      --pop: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Monaco, "Courier New", monospace;
+      padding: 32px clamp(16px, 4vw, 64px) 120px;
+      min-height: 100vh;
+    }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 32px; }
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+      border: 4px solid var(--ink);
+      background: var(--hit);
+      padding: 10px 18px;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0 var(--ink);
+      display: inline-block;
+    }
+    .nav { font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+    .nav a { color: var(--ink); text-decoration: none; border-bottom: 3px solid var(--ink); padding-bottom: 2px; }
+    .nav a:hover { border-color: var(--hit); }
+
+    .drop {
+      border: 4px dashed var(--ink);
+      background: #fff;
+      padding: 72px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s;
+      user-select: none;
+    }
+    .drop.hot { background: var(--hit); transform: translate(-4px, -4px); box-shadow: 8px 8px 0 var(--ink); }
+    .drop b { display: block; font-size: 1.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .drop small { display: block; margin-top: 8px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.75rem; }
+
+    #results { margin-top: 32px; }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .avatar-wrap {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      background: var(--ink);
+    }
+    .avatar {
+      position: absolute;
+      inset: 0;
+      border: 3px solid var(--ink);
+      cursor: pointer;
+      image-rendering: pixelated;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      transition: transform 0.2s cubic-bezier(.18,.85,.25,1.2);
+      will-change: transform;
+    }
+    .avatar:hover { transform: translate(-4px, -4px); }
+    .avatar:active { transform: translate(2px, 2px); }
+
+    /* Hover preview */
+    .preview {
+      display: none;
+      position: fixed;
+      pointer-events: none;
+      z-index: 100;
+      border: 4px solid var(--ink);
+      box-shadow: 8px 8px 0 var(--ink);
+      background: #fff;
+      padding: 4px;
+    }
+    .preview img {
+      width: 128px;
+      height: 128px;
+      image-rendering: pixelated;
+      display: block;
+    }
+    .preview .info {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 6px;
+      background: var(--ink);
+      color: var(--bg);
+      text-align: center;
+      font-weight: 800;
+    }
+
+    /* Context menu */
+    .ctx-menu {
+      display: none;
+      position: fixed;
+      z-index: 200;
+      background: #fff;
+      border: 4px solid var(--ink);
+      box-shadow: 8px 8px 0 var(--ink);
+      min-width: 180px;
+    }
+    .ctx-menu.open { display: block; }
+    .ctx-item {
+      display: block;
+      width: 100%;
+      border: none;
+      background: none;
+      font: inherit;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 12px 16px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .ctx-item:hover { background: var(--hit); }
+    .ctx-item + .ctx-item { border-top: 2px solid var(--ink); }
+
+    .count-bar {
+      margin-bottom: 16px;
+      font-size: 0.85rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(40px);
+      background: var(--ink);
+      color: var(--bg);
+      padding: 10px 16px;
+      border: 3px solid var(--ink);
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 99;
+    }
+    .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    .err {
+      border: 4px solid var(--ink);
+      background: #ff3b30;
+      color: #fff;
+      padding: 14px 18px;
+      margin-top: 16px;
+      box-shadow: 6px 6px 0 var(--ink);
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+    }
+    .noop {
+      border: 4px solid var(--ink);
+      background: #0b0b0b;
+      color: #fff;
+      padding: 20px 24px;
+      margin-top: 16px;
+      box-shadow: 6px 6px 0 var(--ink);
+      font-weight: 800;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+      letter-spacing: 0.06em;
+    }
+
+    footer { margin-top: 60px; font-size: 0.75rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.08em; }
+    footer a { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Profile.exe</h1>
+    <div class="nav"><a href="/">Palette.exe</a></div>
+  </header>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Upload composite image">
+    <b>Drop composite avatar image</b>
+    <small>or click / paste (Cmd+V) — detects grid, extracts 24x24 avatars</small>
+    <input type="file" id="file" accept="image/*" hidden />
+  </div>
+
+  <div id="err"></div>
+  <div id="results"></div>
+
+  <div class="preview" id="preview">
+    <img id="previewImg" src="" alt="" />
+    <div class="info" id="previewInfo">24x24</div>
+  </div>
+
+  <div class="ctx-menu" id="ctxMenu">
+    <button class="ctx-item" data-action="b64">Copy base64</button>
+    <button class="ctx-item" data-action="img">Copy image</button>
+  </div>
+
+  <div class="toast" id="toast">Copied</div>
+
+  <footer>No storage. Grid detected by color-difference — no AI. <a href="/">Palette.exe</a></footer>
+
+<script>
+(() => {
+  const drop = document.getElementById('drop');
+  const file = document.getElementById('file');
+  const results = document.getElementById('results');
+  const errEl = document.getElementById('err');
+  const toast = document.getElementById('toast');
+  const preview = document.getElementById('preview');
+  const previewImg = document.getElementById('previewImg');
+  const previewInfo = document.getElementById('previewInfo');
+  const ctxMenu = document.getElementById('ctxMenu');
+  let ctxTarget = null; // current avatar b64
+
+  // --- File input ---
+  drop.addEventListener('click', () => file.click());
+  drop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); }
+  });
+  file.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+  // --- Drag & drop ---
+  document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) drop.classList.remove('hot'); });
+  ['dragenter', 'dragover'].forEach(ev =>
+    document.addEventListener(ev, (e) => {
+      if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); drop.classList.add('hot'); }
+    })
+  );
+  document.addEventListener('drop', (e) => {
+    const f = e.dataTransfer?.files?.[0];
+    if (!f || !f.type.startsWith('image/')) return;
+    e.preventDefault();
+    drop.classList.remove('hot');
+    handleFile(f);
+  });
+
+  // --- Paste ---
+  document.addEventListener('paste', (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const img = [...(dt.items || [])].find(i => i.kind === 'file' && i.type.startsWith('image/'));
+    if (img) { e.preventDefault(); handleFile(img.getAsFile()); }
+  }, true);
+
+  // --- Close context menu ---
+  document.addEventListener('click', (e) => {
+    if (!ctxMenu.contains(e.target)) ctxMenu.classList.remove('open');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') ctxMenu.classList.remove('open');
+  });
+
+  // --- Context menu actions ---
+  ctxMenu.addEventListener('click', async (e) => {
+    const action = e.target.dataset?.action;
+    if (!action || !ctxTarget) return;
+    ctxMenu.classList.remove('open');
+    if (action === 'b64') {
+      const res = await copyText(ctxTarget);
+      flashToast(res.ok ? 'Base64 copied' : 'Copy failed');
+    } else if (action === 'img') {
+      await copyImage(ctxTarget);
+    }
+  });
+
+  async function handleFile(f) {
+    errEl.innerHTML = '';
+    results.innerHTML = '';
+    if (!f.type.startsWith('image/')) return;
+
+    const b64 = await toBase64(f);
+
+    const loading = document.createElement('div');
+    loading.className = 'noop';
+    loading.textContent = 'Detecting avatar grid...';
+    results.appendChild(loading);
+
+    try {
+      const res = await fetch('/api/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 }),
+      });
+      const data = await res.json();
+      loading.remove();
+
+      if (!res.ok) { showError(data.detail || `HTTP ${res.status}`); return; }
+      if (!data.count) {
+        const noop = document.createElement('div');
+        noop.className = 'noop';
+        noop.textContent = 'No avatar grid detected — image does not contain a recognizable bordered grid pattern.';
+        results.appendChild(noop);
+        return;
+      }
+      renderAvatars(data.avatars);
+    } catch (err) {
+      loading.remove();
+      showError(err.message || String(err));
+    }
+  }
+
+  function renderAvatars(avatars) {
+    const bar = document.createElement('div');
+    bar.className = 'count-bar';
+    bar.textContent = `${avatars.length} avatar${avatars.length === 1 ? '' : 's'} extracted — click to copy`;
+    results.appendChild(bar);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    avatars.forEach((b64, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'avatar-wrap';
+      const img = document.createElement('img');
+      img.className = 'avatar';
+      img.src = `data:image/png;base64,${b64}`;
+      img.alt = `Avatar ${i + 1}`;
+      img.dataset.b64 = b64;
+
+      // Left click → copy base64
+      img.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const res = await copyText(b64);
+        flashToast(res.ok ? 'Base64 copied' : 'Copy failed');
+      });
+
+      // Right click → context menu
+      img.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        ctxTarget = b64;
+        ctxMenu.style.left = e.clientX + 'px';
+        ctxMenu.style.top = e.clientY + 'px';
+        ctxMenu.classList.add('open');
+      });
+
+      // Hover → preview
+      img.addEventListener('mouseenter', (e) => {
+        previewImg.src = img.src;
+        previewInfo.textContent = '24x24 · click to copy';
+        preview.style.display = 'block';
+        positionPreview(e);
+      });
+      img.addEventListener('mousemove', positionPreview);
+      img.addEventListener('mouseleave', () => { preview.style.display = 'none'; });
+
+      wrap.appendChild(img);
+      grid.appendChild(wrap);
+    });
+    results.appendChild(grid);
+  }
+
+  function positionPreview(e) {
+    const pad = 16;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + 160 > window.innerWidth) x = e.clientX - 160;
+    if (y + 180 > window.innerHeight) y = e.clientY - 180;
+    preview.style.left = x + 'px';
+    preview.style.top = y + 'px';
+  }
+
+  function toBase64(f) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onerror = () => reject(r.error);
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.readAsDataURL(f);
+    });
+  }
+
+  async function copyText(text) {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(text); return { ok: true }; }
+      catch (_) {}
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (ok) return { ok: true };
+    } catch (_) {}
+    return { ok: false };
+  }
+
+  async function copyImage(b64) {
+    try {
+      const resp = await fetch(`data:image/png;base64,${b64}`);
+      const blob = await resp.blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      flashToast('Image copied');
+    } catch (_) {
+      flashToast('Image copy failed — try base64');
+    }
+  }
+
+  let toastTimer;
+  function flashToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('on'), 1200);
+  }
+
+  function showError(msg) {
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.textContent = msg;
+    errEl.appendChild(e);
+    setTimeout(() => e.remove(), 6000);
+  }
+})();
+</script>
+</body>
+</html>

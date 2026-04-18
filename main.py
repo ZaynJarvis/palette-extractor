@@ -7,10 +7,9 @@ import binascii
 import colorsys
 from io import BytesIO
 from pathlib import Path
-
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
@@ -119,6 +118,161 @@ def _format_palette_text(palettes: list[list[tuple[str, str]]]) -> str:
     return "\n---\n".join(parts) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Profile Extractor — color-difference grid detection for avatar cropping
+# ---------------------------------------------------------------------------
+
+PROFILE_OUTPUT_SIZE = 24
+MIN_CELL_SIZE = 20
+MIN_AVATAR_DIM = 30
+BORDER_TOLERANCE = 25
+SEPARATOR_THRESHOLD = 0.5
+MAJOR_SEP_THRESHOLD = 0.85
+MAJOR_SEP_MIN_WIDTH = 8
+
+
+def _detect_border_color(arr: np.ndarray, sample_width: int = 10) -> np.ndarray:
+    """Detect dominant border color by sampling image edges."""
+    h, w = arr.shape[:2]
+    sw = min(sample_width, h // 4, w // 4)
+    edges = np.concatenate([
+        arr[:sw, :, :3].reshape(-1, 3),
+        arr[-sw:, :, :3].reshape(-1, 3),
+        arr[:, :sw, :3].reshape(-1, 3),
+        arr[:, -sw:, :3].reshape(-1, 3),
+    ])
+    return np.median(edges, axis=0)
+
+
+def _border_fraction(arr: np.ndarray, bg: np.ndarray, tol: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per-row and per-col fraction of pixels matching border color."""
+    diff = np.abs(arr[:, :, :3].astype(float) - bg).max(axis=2)
+    mask = diff < tol
+    return mask.mean(axis=1), mask.mean(axis=0)
+
+
+def _group_consecutive(indices: np.ndarray, min_gap: int = 3) -> list[tuple[int, int]]:
+    if len(indices) == 0:
+        return []
+    groups: list[tuple[int, int]] = []
+    start = prev = int(indices[0])
+    for idx in indices[1:]:
+        idx = int(idx)
+        if idx - prev > min_gap:
+            groups.append((start, prev))
+            start = idx
+        prev = idx
+    groups.append((start, prev))
+    return groups
+
+
+def _find_separator_bands(
+    frac: np.ndarray, threshold: float, min_width: int = 2,
+) -> list[tuple[int, int]]:
+    indices = np.where(frac > threshold)[0]
+    groups = _group_consecutive(indices)
+    return [(s, e) for s, e in groups if e - s + 1 >= min_width]
+
+
+def _bands_to_cells(
+    bands: list[tuple[int, int]], total: int, min_size: int = MIN_CELL_SIZE,
+) -> list[tuple[int, int]]:
+    cells: list[tuple[int, int]] = []
+    prev = 0
+    for s, e in bands:
+        if s - prev >= min_size:
+            cells.append((prev, s))
+        prev = e + 1
+    if total - prev >= min_size:
+        cells.append((prev, total))
+    return cells
+
+
+def _trim_padding(arr: np.ndarray, bg: np.ndarray, tol: int) -> np.ndarray:
+    diff = np.abs(arr[:, :, :3].astype(float) - bg).max(axis=2)
+    content = diff >= tol
+    rows = np.where(content.mean(axis=1) > 0.08)[0]
+    cols = np.where(content.mean(axis=0) > 0.08)[0]
+    if len(rows) == 0 or len(cols) == 0:
+        return arr
+    return arr[int(rows[0]):int(rows[-1]) + 1, int(cols[0]):int(cols[-1]) + 1]
+
+
+def _image_to_b64(img: Image.Image) -> str:
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def extract_profiles(img: Image.Image) -> list[str]:
+    """Detect avatar grid and extract each avatar as 24x24 base64 PNG.
+
+    Returns empty list if no grid pattern is detected (no-op).
+    """
+    arr = np.array(img.convert("RGB"))
+    h, w = arr.shape[:2]
+    if h < 40 or w < 40:
+        return []
+
+    bg = _detect_border_color(arr)
+    row_frac, col_frac = _border_fraction(arr, bg, BORDER_TOLERANCE)
+
+    # Find major panel separators (wide bands)
+    major_rows = _find_separator_bands(row_frac, MAJOR_SEP_THRESHOLD, MAJOR_SEP_MIN_WIDTH)
+    major_cols = _find_separator_bands(col_frac, MAJOR_SEP_THRESHOLD, MAJOR_SEP_MIN_WIDTH)
+
+    # Need at least 2 separator bands on each axis to form a grid
+    if len(major_rows) < 2 and len(major_cols) < 2:
+        return []
+
+    panel_rows = _bands_to_cells(major_rows, h, min_size=40)
+    panel_cols = _bands_to_cells(major_cols, w, min_size=40)
+
+    if not panel_rows or not panel_cols:
+        return []
+
+    avatars: list[str] = []
+    for pr0, pr1 in panel_rows:
+        for pc0, pc1 in panel_cols:
+            panel = arr[pr0:pr1, pc0:pc1]
+            ph, pw = panel.shape[:2]
+
+            p_row_frac, p_col_frac = _border_fraction(panel, bg, BORDER_TOLERANCE)
+            sub_row_bands = _find_separator_bands(p_row_frac, SEPARATOR_THRESHOLD, 2)
+            sub_col_bands = _find_separator_bands(p_col_frac, SEPARATOR_THRESHOLD, 2)
+            sub_rows = _bands_to_cells(sub_row_bands, ph, MIN_CELL_SIZE)
+            sub_cols = _bands_to_cells(sub_col_bands, pw, MIN_CELL_SIZE)
+
+            for sr0, sr1 in sub_rows:
+                for sc0, sc1 in sub_cols:
+                    cell = panel[sr0:sr1, sc0:sc1]
+                    ch, cw = cell.shape[:2]
+                    aspect = cw / max(ch, 1)
+                    if ch < 50 or cw < 50 or aspect > 3.0 or aspect < 0.25:
+                        continue
+                    trimmed = _trim_padding(cell, bg, BORDER_TOLERANCE)
+                    th, tw = trimmed.shape[:2]
+                    if th < MIN_AVATAR_DIM or tw < MIN_AVATAR_DIM:
+                        continue
+                    pil = Image.fromarray(trimmed).resize(
+                        (PROFILE_OUTPUT_SIZE, PROFILE_OUTPUT_SIZE), Image.NEAREST,
+                    )
+                    avatars.append(_image_to_b64(pil))
+
+    return avatars
+
+
+class ProfileRequest(BaseModel):
+    image: str = Field(..., description="Base64-encoded composite image")
+
+
+@app.post("/api/profiles")
+async def api_profiles(req: ProfileRequest) -> JSONResponse:
+    img = _decode_image(req.image)
+    results = extract_profiles(img)
+    return JSONResponse({"avatars": results, "count": len(results)})
+
+
 @app.post("/api", response_class=PlainTextResponse)
 async def api(req: PaletteRequest) -> PlainTextResponse:
     if not req.images:
@@ -132,6 +286,11 @@ async def api(req: PaletteRequest) -> PlainTextResponse:
 @app.get("/")
 async def root() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+
+@app.get("/profiles")
+async def profiles_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "profiles.html", media_type="text/html")
 
 
 @app.get("/health", response_class=PlainTextResponse)
